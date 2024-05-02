@@ -1,0 +1,19 @@
+{
+  "name": "mini-tsc",
+  "version": "1.0.0",
+  "description": "a compiler that compiles a mini-typescript to javascript",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [
+    "typescript",
+    "compiler"
+  ],
+  "author": "rene",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.12.7"
+  }
+}
