@@ -1,17 +1,15 @@
-import { Error, Module } from "./types";
+import { Error, TModule } from "./ast";
 import { errors } from "./error";
 import { lex } from "./lex";
 import { parse } from "./parse";
-import { bind } from "./bind";
 import { check } from "./check";
-import { transform } from "./transform";
 import { emit } from "./emit";
 
-export function compile(s: string): [Module, Error[], string] {
+export function compile(file: string): [TModule, Error[], string] {
   errors.clear();
-  const tree = parse(lex(s));
-  bind(tree);
+  const lexer = lex(file);
+  const tree = parse(lexer);
   check(tree);
-  const js = emit(transform(tree.statements));
+  const js = emit(tree.statements);
   return [tree, Array.from(errors.values()), js];
 }

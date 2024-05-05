@@ -5,7 +5,8 @@
   "main": "src/index.ts",
   "type": "commonjs",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "test": "./bin/tscc -p sample.ts"
   },
   "keywords": [
     "typescript",
@@ -15,5 +16,8 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.12.7"
+  },
+  "dependencies": {
+    "printf": "^0.6.1"
   }
 }

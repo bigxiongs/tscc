@@ -1,93 +1,161 @@
 import {
-  Module,
-  Statement,
-  Type,
-  Node,
-  Expression,
-  Identifier,
-  TypeAlias,
-} from "./types";
+  TStatement,
+  AST,
+  TModule,
+  Table,
+  TTypeExpr,
+  TExpr,
+  TObjectType,
+  TFuncType,
+  TUnionType,
+  TPrim,
+} from "./ast";
 import { error } from "./error";
-import { resolve } from "./bind";
+import { bind, resolveType, resolveValue } from "./bind";
 
-const stringType: Type = { id: "string" };
-const numberType: Type = { id: "number" };
-const errorType: Type = { id: "error" };
-
-let module: Module;
-
-function typeToString(type: Type) {
-  return type.id;
-}
-
-function checkStatement(statement: Statement): Type {
+function checkStatement(statement: TStatement, ...locals: Table[]) {
   switch (statement.kind) {
-    case Node.EXPRESSION:
-      return checkExpression(statement.expr);
-    case Node.VAR:
-      const i = checkExpression(statement.init);
-      if (!statement.typename) return i;
-
-      const t = checkType(statement.typename);
-      if (t !== i && t !== errorType)
-        error(
-          statement.init.pos,
-          `Cannot assign initialiser of type '${typeToString(
-            i
-          )}' to variable with declared type '${typeToString(t)}'.`
-        );
-      return t;
-    case Node.TYPEALIAS:
-      return checkType(statement.typename);
-  }
-}
-
-function checkExpression(expression: Expression): Type {
-  switch (expression.kind) {
-    case Node.ID:
-      const symbol = resolve(module.locals, expression.text, Node.VAR);
-      if (symbol) return checkStatement(symbol.valueDeclaration!);
-      error(expression.pos, "Could not resolve " + expression.text);
-      return errorType;
-    case Node.NUMBERLITERAL:
-      return numberType;
-    case Node.ASSIGNMENT:
-      const v = checkExpression(expression.value);
-      const t = checkExpression(expression.name);
-      if (t !== v)
-        error(
-          expression.value.pos,
-          `Cannot assign value of type '${typeToString(
-            v
-          )}' to variable of type '${typeToString(t)}'.`
-        );
-      return t;
-  }
-}
-
-function checkType(name: Identifier): Type {
-  switch (name.text) {
-    case "string":
-      return stringType;
-    case "number":
-      return numberType;
+    case AST.IF:
+      checkExpr(statement.cond, ...locals);
+      checkScope(statement.thenn, ...locals);
+      checkScope(statement.elsee, ...locals);
+      break;
+    case AST.WHILE:
+      checkExpr(statement.cond, ...locals);
+      checkScope(statement.body, ...locals);
+      break;
+    case AST.RETURN:
+      checkExpr(statement.value, ...locals);
+      break;
+    // TDecl
+    case AST.VAR:
+      let symbol = locals[0].get(statement.id.id);
+      if (symbol?.value?.kind == AST.VAR || symbol?.value?.kind == AST.FUNCTION)
+        symbol.value = statement;
+      // typ = statement.value && checkExpression(statement.value);
+      // typ && expect(typ, statement.type ?? "any", statement.pos, ...locals);
+      break;
+    case AST.LET:
+      break;
+    case AST.CONST:
+      break;
+    case AST.FUNCTION:
+      break;
+    case AST.TYPE:
+      break;
     default:
-      const symbol = resolve(module.locals, name.text, Node.TYPEALIAS);
-      if (!symbol)
-        return (
-          error(name.pos, "Could not resolve type " + name.text), errorType
-        );
-      return checkType(
-        (
-          symbol.declarations.find(
-            (d) => d.kind === Node.TYPEALIAS
-          ) as TypeAlias
-        ).typename
-      );
+      checkExpr(statement, ...locals);
   }
 }
 
-export function check(_module: Module) {
-  module = _module;
-  return _module.statements.map(checkStatement);
+function checkExpr(expr: TExpr, ...locals: Table[]): TTypeExpr {
+  let typ1: TTypeExpr = "any", typ2: TTypeExpr = "any";
+  switch (expr.kind) {
+    case AST.ELE:
+      typ1 = checkExpr(expr.obj);
+      typ2 = checkExpr(expr.index);
+      expect(typ1, "object", expr.pos, ...locals);
+      expect(typ2, "number", expr.pos, ...locals);
+      return checkEle(typ1, typ2, ...locals);
+    case AST.BOP:
+      typ1 = checkExpr(expr.left);
+      typ2 = checkExpr(expr.right);
+      if (["+", "-", "*", "/", "&", "|"].includes(expr.op)) return "number";
+      return "boolean";
+    case AST.UOP:
+      typ1 = checkExpr(expr.exp);
+      if (["-"].includes(expr.op)) return "number";
+      return "boolean";
+    case AST.CALL:
+      typ1 = checkExpr(expr.funcid) as TFuncType;
+      expect(typ1, "function", expr.pos, ...locals);
+      for (let i = 0; i < expr.args.length; i++) {
+        expect(
+          checkExpr(expr.args[i]),
+          typ1.args[i],
+          expr.pos,
+          ...locals
+        );
+      }
+      return typ1.return;
+    case AST.PROP:
+      typ1 = checkExpr(expr.obj) as TObjectType;
+      expect(typ1, "object", expr.pos, ...locals);
+      return typ1.props[expr.prop.id];
+    case AST.FALSE:
+      return "boolean";
+    case AST.TRUE:
+      return "boolean";
+    case AST.THIS:
+      return "object";
+    case AST.NEW:
+      return "object";
+    case AST.ID:
+      return resolveType(expr.id, ...locals) ?? "any";
+    case AST.NUM:
+      return "number";
+    case AST.ASSIGN:
+      typ1 = resolveType(expr.id.id, ...locals);
+      typ2 = checkExpr(expr.value, ...locals);
+      expect(typ1, typ2, expr.pos, ...locals);
+      return typ2;
+    case AST.PROPASSIGN:
+      typ1 = checkExpr(expr.prop, ...locals);
+      typ2 = checkExpr(expr.value, ...locals);
+      expect(typ1, typ2, expr.pos, ...locals);
+      return typ2;
+    case AST.ARRAYASSIGN:
+      typ1 = checkExpr(expr.ele, ...locals);
+      typ2 = checkExpr(expr.value, ...locals);
+      expect(typ1, typ2, expr.pos, ...locals);
+      return typ2;
+    case AST.LIST:
+      for (let i = 0; i < expr.list.length; i++)
+        typ1 = checkExpr(expr.list[i]);
+      if (typ1) return typ1;
+      return "any";
+    case AST.FUNCEXP:
+      return "function";
+    case AST.OBJ:
+      return { kind: AST.OBJECTTYPE, props: expr.props };
+  }
 }
+
+const checkEle = (
+  obj: TObjectType,
+  index: TTypeExpr,
+  ...locals: Table[]
+): TTypeExpr => {
+  return "any";
+};
+
+const expect = (
+  provided: TTypeExpr,
+  expected: TTypeExpr,
+  pos: number,
+  ...locals: Table[]
+) => {
+  if (!isAssignable(provided, expected, ...locals))
+    error(pos, `type '${provided}' is not assignable to type ${expected}`);
+};
+
+const isAssignable = (
+  provided: TFuncType | TUnionType | TObjectType | TPrim,
+  expected: TFuncType | TUnionType | TObjectType | TPrim,
+  ...locals: Table[]
+): boolean => {
+  if (typeof provided == "string") {
+    if (typeof expected == "string") return provided == expected;
+    switch (expected.kind) {
+      case AST.FUNCTYPE:
+        return provided == "function"
+    }
+  }
+};
+
+const checkStatements = (statements: TStatement[], ...locals: Table[]) =>
+  statements.forEach((stmt) => checkStatement(stmt, ...locals));
+
+const checkScope = (stmts: TStatement[], ...globals: Table[]) =>
+  checkStatements(stmts, bind(stmts, new Map()), ...globals);
+export const check = (module: TModule) => checkScope(module.statements);

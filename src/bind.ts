@@ -1,38 +1,67 @@
-import { Module, Node, Statement, Table, Symbol } from "./types";
+import { Table, TStatement, AST, TTypeExpr, TDecl } from "./ast";
 import { error } from "./error";
-function bindStatement(locals: Table, statement: Statement): void {
-  if (statement.kind != Node.VAR && statement.kind != Node.TYPEALIAS) return;
 
-  const symbol = locals.get(statement.name.text);
+function bindStatement(locals: Table, statement: TStatement): void {
+  if (
+    statement.kind != AST.VAR &&
+    statement.kind != AST.CONST &&
+    statement.kind != AST.LET &&
+    statement.kind != AST.FUNCTION &&
+    statement.kind != AST.TYPE
+  )
+    return;
+  const symbol = locals.get(statement.id.id);
   if (!symbol)
     return (
-      locals.set(statement.name.text, {
-        declarations: [statement],
-        valueDeclaration: statement.kind === Node.VAR ? statement : undefined,
+      locals.set(statement.id.id, {
+        decls: [statement],
+        type: statement.kind == AST.TYPE ? statement : undefined,
+        value: statement.kind == AST.TYPE ? undefined : statement,
       }),
       undefined
     );
 
-  const other = symbol.declarations.find((d) => d.kind === statement.kind);
-  if (other)
-    return error(
-      statement.pos,
-      `Cannot redeclare ${statement.name.text}; first declared at ${other.pos}`
-    );
+  if (statement.kind == AST.TYPE) {
+    if (symbol.type)
+      return error(statement.pos, `Cannot redeclare type ${statement.id}`);
+    symbol.type = statement;
+  } else if (statement.kind == AST.LET || statement.kind == AST.CONST) {
+    if (symbol.value)
+      return error(statement.pos, `Cannot redeclare type ${statement.id}`);
+    symbol.value = statement;
+  } else if (statement.kind == AST.FUNCTION) {
+    if (symbol.value?.kind == AST.LET || symbol.value?.kind == AST.CONST)
+      return error(statement.pos, `Cannot redeclare type ${statement.id}`);
+    symbol.value = statement;
+  } else if (statement.kind == AST.VAR) {
+    if (symbol.value?.kind != AST.VAR)
+      return error(statement.pos, `Cannot redeclare type ${statement.id}`);
+    symbol.value = statement;
+  }
 
-  symbol.declarations.push(statement);
-  if (statement.kind === Node.VAR) symbol.valueDeclaration = statement;
+  symbol.decls.push(statement);
 }
 
-export function bind(m: Module): void {
-  m.statements.forEach((stmt) => bindStatement(m.locals, stmt));
+export const bind = (statements: TStatement[], locals: Table) => (
+  statements.forEach((stmt) => bindStatement(locals, stmt)), locals
+);
+
+export const resolveType = (id: string, ...locals: Table[]): TTypeExpr => {
+  let symbol: TTypeExpr = "any";
+  for (let i = 0; i < locals.length; i++)
+    if (locals[i].get(id)?.type) {
+      symbol = locals[i].get(id)?.type?.type as TTypeExpr
+      break
+    }
+  return symbol
 }
 
-export function resolve(
-  locals: Table,
-  name: string,
-  meaning: Node.VAR | Node.TYPEALIAS
-): Symbol | undefined {
-  const symbol = locals.get(name);
-  if (symbol?.declarations.some((d) => d.kind == meaning)) return symbol;
+export const resolveValue = (id: string, ...locals: Table[]): TDecl | undefined => {
+  let symbol;
+  for (let i = 0; i < locals.length; i++)
+    if (locals[i].get(id)?.value) {
+      symbol = locals[i].get(id)?.value
+      break
+    }
+  return symbol
 }

@@ -1,113 +1,414 @@
+import { Lexer, Token } from "./token";
 import {
-  Lexer,
-  Token,
-  Node,
-  Statement,
-  Identifier,
-  Expression,
-  Module,
-} from "./types";
+  AST,
+  TModule,
+  TStatement,
+  TDecl,
+  TExpr,
+  TVar,
+  TID,
+  TLet,
+  TConst,
+  TFunction,
+  TType,
+  TPrim,
+  TIf,
+  TWhile,
+  TReturn,
+  TTypeExpr,
+} from "./ast";
 import { error } from "./error";
 
 let lexer: Lexer;
 
-function parseModule(): Module {
-  const statements = parseStatements(parseStatement, () =>
-    tryExpect(Token.SEMICOLON)
-  );
+const parseModule = (): TModule => {
+  const statements = parseStatements();
   expect(Token.EOF);
-  return { statements, locals: new Map() };
-}
+  return { kind: AST.MODULE, statements, locals: new Map() };
+};
 
-function parseStatements(
-  parseStatement: () => Statement,
-  separator: () => unknown
-): Statement[] {
-  const statements: Statement[] = Array<Statement>();
+const parseStatements = (): TStatement[] => {
+  const statements: TStatement[] = Array<TStatement>();
   do {
-    statements.push(parseStatement());
-  } while (separator());
+    const stmt = parseStatement();
+    if (stmt) statements.push(stmt);
+    else break;
+  } while (
+    (tryExpect(Token.SEMICOLON) || lexer.newline) &&
+    lexer.token != Token.EOF
+  );
   return statements;
-}
+};
 
-function parseStatement(): Statement {
-  const pos = lexer.pos;
+const parseStatement = (): TStatement => {
   switch (lexer.token) {
     case Token.VAR:
-      return parseVarDeclare();
+      return parseDeclare();
+    case Token.LET:
+      return parseDeclare();
+    case Token.CONST:
+      return parseDeclare();
+    case Token.FUNCTION:
+      return parseDeclare();
     case Token.TYPE:
-      return parseTypeDeclare();
+      return parseDeclare();
+    case Token.IF:
+      return parseIf();
+    case Token.WHILE:
+      return parseWhile();
+    case Token.ID:
+      return parseExp();
+    case Token.RETURN:
+      return parseReturn();
     default:
-      return { kind: Node.EXPRESSION, expr: parseExpression(), pos };
+      return parseExp();
   }
-}
+};
 
-function parseVarDeclare(): Statement {
-  const pos = lexer.pos;
-  expect(Token.VAR);
-  const name = parseIdentifier();
-  const typename = tryExpect(Token.COLON) ? parseIdentifier() : undefined;
+const parseDeclare = (token = lexer.token): TDecl => {
+  expect(token);
+  switch (token) {
+    case Token.VAR:
+      return parseVar();
+    case Token.LET:
+      return parseLet();
+    case Token.CONST:
+      return parseConst();
+    case Token.FUNCTION:
+      return parseFunction();
+    case Token.TYPE:
+      return parseTypeAlias();
+    default:
+      throw new Error();
+  }
+};
 
+const parseVar = (pos = lexer.pos): TVar => {
+  const id = expectID();
+  const type = tryExpect(Token.COLON) ? parseType() : undefined;
+  const value = tryExpect(Token.EQUAL) ? parseExp() : undefined;
+  return { kind: AST.VAR, id, type, value, pos };
+};
+
+const parseProp = (pos = lexer.pos): TVar => {
+  const id = expectID();
+  const value = tryExpect(Token.COLON) ? parseExp() : undefined;
+  return { kind: AST.VAR, id, value, pos };
+};
+
+const parseLet = (pos = lexer.pos): TLet => {
+  const id = expectID();
+  const type = tryExpect(Token.COLON) ? parseType() : undefined;
+  const value = tryExpect(Token.EQUAL) ? parseExp() : undefined;
+  return { kind: AST.LET, id, type, value, pos };
+};
+
+const parseConst = (pos = lexer.pos): TConst => {
+  const id = expectID();
+  const type = tryExpect(Token.COLON) ? parseType() : undefined;
   expect(Token.EQUAL);
-  const init = parseExpression();
-  return { kind: Node.VAR, name, typename, init, pos };
-}
+  const value = parseExp();
+  return { kind: AST.CONST, id, type, value, pos };
+};
 
-function parseTypeDeclare(): Statement {
-  const pos = lexer.pos;
-  expect(Token.TYPE);
-  const name = parseIdentifier();
+const parseFunction = (pos = lexer.pos): TFunction => {
+  const funcid = expectID();
+  expect(Token.LPAREN);
+  const args = [];
+  while (lexer.token == Token.ID) args.push(parseVar());
+  expect(Token.RPAREN);
+  const type = tryExpect(Token.COLON) ? parseType() : "void";
+  expect(Token.LCURLY);
+  const body = parseStatements();
+  expect(Token.RCURLY);
+  return { kind: AST.FUNCTION, id: funcid, type, args, body, pos };
+};
+
+const parseTypeAlias = (pos = lexer.pos): TType => {
+  const id = expectID();
   expect(Token.EQUAL);
-  const typename = parseIdentifier();
-  return { kind: Node.TYPEALIAS, name, typename, pos };
-}
+  const type = parseType();
+  return { kind: AST.TYPE, id, type, pos };
+};
 
-function parseExpression(): Expression {
-  const pos = lexer.pos;
-  const e = parseIdentifierOrLiteral();
-  if (e.kind === Node.ID && tryExpect(Token.EQUAL)) {
-    return { kind: Node.ASSIGNMENT, name: e, value: parseExpression(), pos };
+const parseIf = (pos = lexer.pos): TIf => {
+  expect(Token.IF);
+  expect(Token.LPAREN);
+  const cond = parseExp();
+  expect(Token.RPAREN);
+  let thenn: TStatement[] = [];
+  if (tryExpect(Token.LCURLY)) {
+    thenn = parseStatements();
+    expect(Token.RCURLY);
+  } else {
+    thenn.push(parseStatement());
   }
-  return e;
-}
-
-function parseIdentifierOrLiteral(): Expression {
-  const pos = lexer.pos;
-  if (tryExpect(Token.ID)) {
-    return { kind: Node.ID, text: lexer.lexeme, pos };
-  } else if (tryExpect(Token.NUMBERLITERAL)) {
-    return { kind: Node.NUMBERLITERAL, value: +lexer.lexeme, pos };
+  let elsee: TStatement[] = [];
+  if (tryExpect(Token.ELSE)) {
+    if (tryExpect(Token.LCURLY)) {
+      elsee = parseStatements();
+      expect(Token.RCURLY);
+    } else {
+      elsee = [parseStatement()];
+    }
   }
-  error(pos, "Expected identifier or literal but got " + Token[lexer.token]);
-  lexer.next();
-  return { kind: Node.ID, text: "(missing)", pos };
-}
+  return { kind: AST.IF, cond, thenn, elsee, pos };
+};
 
-function parseIdentifier(): Identifier {
-  const e = parseIdentifierOrLiteral();
-  if (e.kind === Node.ID) {
-    return e;
+const parseWhile = (pos = lexer.pos): TWhile => {
+  expect(Token.WHILE);
+  expect(Token.LPAREN);
+  const cond = parseExp();
+  expect(Token.RPAREN);
+  let body: TStatement[] = [];
+  if (tryExpect(Token.LCURLY)) {
+    body = parseStatements();
+    expect(Token.RCURLY);
+  } else {
+    body.push(parseStatement());
   }
-  error(e.pos, "Expected identifier but got a literal");
-  return { kind: Node.ID, text: "(missing)", pos: e.pos };
-}
+  return { kind: AST.WHILE, cond, body, pos };
+};
 
-function tryExpect(expected: Token) {
+const parseReturn = (pos = lexer.pos): TReturn => {
+  expect(Token.RETURN);
+  const value = parseExp();
+  return { kind: AST.RETURN, value, pos };
+};
+
+const parseExprList = (): TExpr[] => {
+  const exps: TExpr[] = [];
+  if (lexer.token == Token.RPAREN) return exps;
+  exps.push(parseExp());
+  while (tryExpect(Token.COMMA)) exps.push(parseExp());
+  return exps;
+};
+
+const parseAtomExp = (
+  pos = lexer.pos,
+  token = lexer.token,
+  lexeme = lexer.lexeme
+): TExpr => {
+  let funcid, args: any[];
+  expect(token);
+  switch (token) {
+    case Token.LPAREN:
+      let exps = parseExprList();
+      expect(Token.RPAREN);
+      if (exps.length == 1) return exps[0];
+      return { kind: AST.LIST, list: exps, pos };
+    case Token.NUMBERLITERAL:
+      return { kind: AST.NUM, value: +lexeme, pos };
+    case Token.TRUE:
+      return { kind: AST.TRUE, pos };
+    case Token.FALSE:
+      return { kind: AST.FALSE, pos };
+    case Token.THIS:
+      return { kind: AST.THIS, pos };
+    case Token.ID:
+      return { kind: AST.ID, id: lexeme, pos };
+    case Token.NEW:
+      funcid = parseCallExp();
+      expect(Token.LPAREN);
+      args = parseExprList();
+      expect(Token.RPAREN);
+      return { kind: AST.NEW, funcid, args, pos };
+    case Token.FUNCTION:
+      if (lexer.token == Token.ID)
+        funcid = { kind: AST.ID, id: lexer.lexeme, pos } as TID;
+      expect(Token.LPAREN);
+      args = [];
+      while (lexer.token == Token.ID) args.push(parseVar());
+      expect(Token.RPAREN);
+      const type = tryExpect(Token.COLON) ? parseType() : "void";
+      expect(Token.LCURLY);
+      const body = parseStatements();
+      expect(Token.RCURLY);
+      return { kind: AST.FUNCEXP, id: funcid, type, args, body, pos };
+    case Token.LCURLY:
+      args = [];
+      if (tryExpect(Token.RCURLY)) return { kind: AST.OBJ, props: args, pos };
+      do {
+        args.push(parseProp());
+      } while (tryExpect(Token.COMMA) && lexer.token != Token.RCURLY);
+      expect(Token.RCURLY);
+      return { kind: AST.OBJ, props: args, pos };
+    default:
+      error(pos, "Expected identifier or literal but got " + token);
+      return { kind: AST.ID, id: "(missing)", pos };
+  }
+};
+
+// callexp ::= atomexp
+//           | atomexp.id
+//           | atomexp[exp]
+const parseCallExp = (pos = lexer.pos): TExpr => {
+  const obj = parseAtomExp();
+  if (lexer.lexeme != "." && lexer.lexeme != "[") return obj;
+  if (lexer.lexeme == ".") {
+    expect(lexer.token);
+    const prop = expectID();
+    return { kind: AST.PROP, prop, obj, pos };
+  } else {
+    expect(lexer.token);
+    const index = parseExp();
+    expect(Token.RBARCKET);
+    return { kind: AST.ELE, obj, index, pos };
+  }
+};
+
+// notexp ::= callexp
+//          | callexp(...exp)
+const parseNotExp = (pos = lexer.pos): TExpr => {
+  const funcid = parseCallExp();
+  if (!tryExpect(Token.LPAREN)) return funcid;
+  const args = parseExprList();
+  expect(Token.RPAREN);
+  return { kind: AST.CALL, funcid, args, pos };
+};
+
+const parseTimesExp = (pos = lexer.pos): TExpr => {
+  if (tryExpect(Token.BANG))
+    return { kind: AST.UOP, op: "!", exp: parseTimesExp(), pos };
+  if (tryExpect(Token.SUB))
+    return { kind: AST.UOP, op: "-", exp: parseTimesExp(), pos };
+  return parseNotExp();
+};
+
+const parseAddExp = (pos = lexer.pos): TExpr => {
+  const left = parseTimesExp();
+  let op = lexer.lexeme;
+  if (op != "*" && op != "/") return left;
+  expect(lexer.token);
+  const right = parseTimesExp();
+  return { kind: AST.BOP, left, op, right, pos };
+};
+
+const parseLtExp = (pos = lexer.pos): TExpr => {
+  const left = parseAddExp();
+  let op = lexer.lexeme;
+  if (op != "+" && op != "-") return left;
+  expect(lexer.token);
+  const right = parseAddExp();
+  return { kind: AST.BOP, left, op, right, pos };
+};
+
+const parseAndExp = (pos = lexer.pos): TExpr => {
+  const left = parseLtExp();
+  let op = lexer.lexeme;
+  if (op != "<" && op != ">" && op != "==" && op != "===" && op != "!=")
+    return left;
+  expect(lexer.token);
+  const right = parseLtExp();
+  return { kind: AST.BOP, left, op, right, pos };
+};
+
+const parseAssignExp = (pos = lexer.pos): TExpr => {
+  const left = parseAndExp();
+  let op = lexer.lexeme;
+  if (op != "&&" && op != "||") return left;
+  expect(lexer.token);
+  const right = parseAndExp();
+  return { kind: AST.BOP, left, op, right, pos };
+};
+
+// export type TExpr =
+//   | TEle id[expr]
+//   | TBop id op id
+//   | TUop op id
+//   | TCall exp(..)
+//   | TProp id.id
+//   | TFalse false
+//   | TTrue true
+//   | TThis this
+//   | TNew new id(...)
+//   | TID id
+//   | TNumber numliteral
+//   | TAssign id = expr
+//   | TArrayAssign obj[exp] = expr
+//   | TPropAssign obj.id = expr
+const parseExp = (pos = lexer.pos): TExpr => {
+  const left = parseAssignExp();
+  let op = lexer.lexeme;
+  if (op != "=") return left;
+  expect(lexer.token);
+  const right = parseExp();
+  switch (left.kind) {
+    case AST.ID:
+      return { kind: AST.ASSIGN, id: left, value: right, pos };
+    case AST.ELE:
+      return { kind: AST.ARRAYASSIGN, ele: left, value: right, pos };
+    case AST.PROP:
+      return { kind: AST.PROPASSIGN, prop: left, value: right, pos };
+    default:
+      error(pos, "Assign to a expression is invalid");
+      return left;
+  }
+};
+
+const expectID = (pos = lexer.pos, lexeme = lexer.lexeme): TID => {
+  if (tryExpect(Token.ID)) return { kind: AST.ID, id: lexeme, pos };
+  error(pos, "Expected identifier but got a literal" + lexer.token);
+  return { kind: AST.ID, id: "(missing)", pos: pos };
+};
+
+const mapTToken2Ast = {
+  [Token.TNUMBER]: "number",
+  [Token.TSTRING]: "string",
+  [Token.TBOOLEAN]: "boolean",
+  [Token.FUNCTION]: "function",
+  [Token.TUNDEFINED]: "undefined",
+  [Token.TOBJECT]: "object",
+};
+
+const parseType = (token = lexer.token): TTypeExpr => {
+  let type: TTypeExpr = "any";
+  let args = [];
+  switch (token) {
+    case (Token.TNUMBER,
+    Token.TSTRING,
+    Token.TBOOLEAN,
+    Token.TUNDEFINED,
+    Token.TOBJECT,
+    Token.FUNCTION):
+      type = mapTToken2Ast[token] as TPrim;
+      expect(token);
+      break;
+    case Token.LPAREN:
+      expect(token);
+      while (lexer.token == Token.ID) args.push(parseVar());
+      expect(Token.RPAREN);
+      expect(Token.EQUAL);
+      expect(Token.GT);
+      let ret = parseType();
+      type = { kind: AST.FUNCTYPE, args, return: ret };
+      break;
+    case Token.LCURLY:
+      expect(token);
+      while (lexer.token != Token.RCURLY) args.push(parseVar());
+      expect(Token.RCURLY);
+      type = { kind: AST.OBJECTTYPE, props: args };
+      break;
+    default:
+      type = "any";
+  }
+  return type;
+};
+
+const tryExpect = (expected: Token) => {
   const ok = lexer.token == expected;
   if (ok) lexer.next();
-
   return ok;
-}
-function expect(expected: Token) {
-  if (!tryExpect(expected)) {
-    error(
-      lexer.pos,
-      `parseToken: Expected ${Token[expected]} but got ${Token[lexer.token]}`
-    );
-  }
-}
-export function parse(_lexer: Lexer): Module {
+};
+
+const expect = (expected: Token) => {
+  if (!tryExpect(expected))
+    error(lexer.pos, `parseToken: Expected ${expected} but got ${lexer.token}`);
+};
+
+export const parse = (_lexer: Lexer): TModule => {
   lexer = _lexer;
   lexer.next();
-  return parseModule();
-}
+  const module = parseModule();
+  return module;
+};
