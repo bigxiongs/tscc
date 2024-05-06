@@ -7,54 +7,56 @@ export const emit = (statements: TStatement[]) => {
 
 let level: number;
 
-const say = (format: string, ...args: any[]) => {
+const indent = (format: string, ...args: any[]) => {
   let p = printf(format, ...args);
   for (let i = 0; i < level; i++) p = "  " + p;
   return p;
 };
 
-const emitStatements = (stmts: TStatement[]) =>
+const emitStatements = (stmts: TStatement[]) => (
+  (level = 0),
   stmts
     .map(emitStatement)
     .filter((s) => s != "")
-    .join("\n");
+    .join("\n")
+);
 
 const emitStatement = (stmt: TStatement): string => {
   let p1, p2, p3;
   switch (stmt.kind) {
     case AST.IF:
-      p1 = say("if (%s) {\n", emitExpr(stmt.cond));
+      p1 = indent("if (%s) {\n", emitExpr(stmt.cond));
       level++;
       p2 = emitStatements(stmt.thenn) + "\n";
       level--;
-      p3 = say("}");
+      p3 = indent("}");
       if (stmt.elsee.length > 0) {
         p3 += " else {\n";
         level++;
         p3 += emitStatements(stmt.elsee) + "\n";
         level--;
-        p3 += say("}");
+        p3 += indent("}");
       }
       return p1 + p2 + p3;
     case AST.WHILE:
-      p1 = say("while (%s) {\n", emitExpr(stmt.cond));
+      p1 = indent("while (%s) {\n", emitExpr(stmt.cond));
       level++;
       p2 = emitStatements(stmt.body) + "\n";
       level--;
-      p3 = say("}");
+      p3 = indent("}");
       return p1 + p2 + p3;
     case AST.RETURN:
-      return say("return %s;", emitExpr(stmt.value));
+      return indent("return %s;", emitExpr(stmt.value));
     // case AST.DECL:
     case AST.VAR:
-      return say("var %s;", emitVar(stmt));
+      return indent("var %s;", emitVar(stmt));
     case AST.LET:
-      p1 = say("let %s", emitExpr(stmt.id));
+      p1 = indent("let %s", emitExpr(stmt.id));
       p2 = ";";
       if (stmt.value) p2 = " = " + emitExpr(stmt.value) + p2;
       return p1 + p2;
     case AST.CONST:
-      p1 = say("const %s", emitExpr(stmt.id));
+      p1 = indent("const %s", emitExpr(stmt.id));
       p2 = " = " + emitExpr(stmt.value) + ";";
       return p1 + p2;
     case AST.FUNCTION:
@@ -75,8 +77,8 @@ const emitVar = (stmt: TVar): string => {
 
 const emitProp = (stmt: TVar): string => {
   let p1 = printf("%s", stmt.id.id);
-  if (!stmt.value) return p1;
-  return say(p1 + ": " + emitExpr(stmt.value));
+  if (!stmt.value) return indent(p1);
+  return indent(p1 + ": " + emitExpr(stmt.value));
 };
 
 const emitExpr = (expr: TExpr): string => {
@@ -150,7 +152,7 @@ const emitExpr = (expr: TExpr): string => {
 };
 
 const emitFunction = (func: TFunction | TFuncExp) => {
-  let p1 = say(
+  let p1 = indent(
     "function %s(%s) {\n",
     func.id ? emitExpr(func.id) : "",
     func.args.map(emitVar).join(", ")
@@ -158,15 +160,15 @@ const emitFunction = (func: TFunction | TFuncExp) => {
   level++;
   let p2 = emitStatements(func.body) + "\n";
   level--;
-  let p3 = say("}");
+  let p3 = indent("}");
   return p1 + p2 + p3;
 };
 
 const emitObj = (obj: TObj) => {
   if (obj.props.length == 0) return "{}";
-  let p1 = say("{\n");
+  let p1 = indent("{\n");
   level++;
   let p2 = obj.props.map(emitProp).join(",\n") + "\n";
   level--;
-  return p1 + p2 + say("}");
+  return p1 + p2 + indent("}");
 };
