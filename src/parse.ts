@@ -11,11 +11,11 @@ import {
   TConst,
   TFunction,
   TType,
-  TPrim,
   TIf,
   TWhile,
   TReturn,
   TTypeExpr,
+  TUndefined,
 } from "./ast";
 import { error } from "./error";
 
@@ -90,12 +90,6 @@ const parseVar = (pos = lexer.pos): TVar => {
   return { kind: AST.VAR, id, type, value, pos };
 };
 
-const parseProp = (pos = lexer.pos): TVar => {
-  const id = expectID();
-  const value = tryExpect(Token.COLON) ? parseExp() : undefined;
-  return { kind: AST.VAR, id, value, pos };
-};
-
 const parseLet = (pos = lexer.pos): TLet => {
   const id = expectID();
   const type = tryExpect(Token.COLON) ? parseType() : undefined;
@@ -106,13 +100,14 @@ const parseLet = (pos = lexer.pos): TLet => {
 const parseConst = (pos = lexer.pos): TConst => {
   const id = expectID();
   const type = tryExpect(Token.COLON) ? parseType() : undefined;
-  expect(Token.EQUAL);
-  const value = parseExp();
+  const value = tryExpect(Token.EQUAL)
+    ? parseExp()
+    : ({ kind: AST.UNDEFINED, pos } as TUndefined);
   return { kind: AST.CONST, id, type, value, pos };
 };
 
 const parseFunction = (pos = lexer.pos): TFunction => {
-  const funcid = expectID();
+  const id = expectID();
   expect(Token.LPAREN);
   const args = [];
   while (lexer.token == Token.ID) args.push(parseVar());
@@ -121,7 +116,13 @@ const parseFunction = (pos = lexer.pos): TFunction => {
   expect(Token.LCURLY);
   const body = parseStatements();
   expect(Token.RCURLY);
-  return { kind: AST.FUNCTION, id: funcid, type, args, body, pos };
+  return { kind: AST.FUNCTION, id, type, args, body, pos };
+};
+
+const parseProp = (pos = lexer.pos): TVar => {
+  const id = expectID();
+  const value = tryExpect(Token.COLON) ? parseExp() : undefined;
+  return { kind: AST.VAR, id, value, pos };
 };
 
 const parseTypeAlias = (pos = lexer.pos): TType => {
@@ -203,6 +204,8 @@ const parseAtomExp = (
       return { kind: AST.TRUE, pos };
     case Token.FALSE:
       return { kind: AST.FALSE, pos };
+    case Token.TUNDEFINED:
+      return { kind: AST.UNDEFINED, pos };
     case Token.THIS:
       return { kind: AST.THIS, pos };
     case Token.ID:
@@ -352,28 +355,29 @@ const expectID = (pos = lexer.pos, lexeme = lexer.lexeme): TID => {
   return { kind: AST.ID, id: "(missing)", pos: pos };
 };
 
-const mapTToken2Ast = {
-  [Token.TNUMBER]: "number",
-  [Token.TSTRING]: "string",
-  [Token.TBOOLEAN]: "boolean",
-  [Token.FUNCTION]: "function",
-  [Token.TUNDEFINED]: "undefined",
-  [Token.TOBJECT]: "object",
-};
-
-const parseType = (token = lexer.token): TTypeExpr => {
+const parseUnionType = (token = lexer.token): TTypeExpr => {
   let type: TTypeExpr = "any";
   let args = [];
   switch (token) {
-    case (Token.TNUMBER,
-    Token.TSTRING,
-    Token.TBOOLEAN,
-    Token.TUNDEFINED,
-    Token.TOBJECT,
-    Token.FUNCTION):
-      type = mapTToken2Ast[token] as TPrim;
-      expect(token);
+    case Token.TNUMBER:
+      type = "number";
+      if (tryExpect(Token.LBRACKET)) {
+        expect(Token.RBARCKET);
+        type = { kind: AST.ARRAYTYPE, type };
+      }
       break;
+    case Token.TSTRING:
+      type = "string";
+      break;
+    case Token.TBOOLEAN:
+      type = "boolean";
+      break;
+    case Token.TUNDEFINED:
+      type = "undefined";
+      break;
+    // case Token.TOBJECT:
+    //   type = "object";
+    //   break;
     case Token.LPAREN:
       expect(token);
       while (lexer.token == Token.ID) args.push(parseVar());
@@ -385,7 +389,11 @@ const parseType = (token = lexer.token): TTypeExpr => {
       break;
     case Token.LCURLY:
       expect(token);
-      while (lexer.token != Token.RCURLY) args.push(parseVar());
+      while (
+        lexer.token != Token.RCURLY &&
+        (tryExpect(Token.SEMICOLON) || tryExpect(Token.COMMA) || lexer.newline)
+      )
+        args.push(parseVar());
       expect(Token.RCURLY);
       type = { kind: AST.OBJECTTYPE, props: args };
       break;
@@ -393,6 +401,14 @@ const parseType = (token = lexer.token): TTypeExpr => {
       type = "any";
   }
   return type;
+};
+
+const parseType = (): TTypeExpr => {
+  let typ1 = parseUnionType();
+  if (lexer.token != Token.BAR) return typ1;
+  let union = [typ1];
+  while (tryExpect(Token.BAR)) union.push(parseType());
+  return { kind: AST.UNIONTYPE, union };
 };
 
 const tryExpect = (expected: Token) => {

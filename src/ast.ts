@@ -17,6 +17,7 @@ export enum AST {
   FUNCTYPE,
   UNIONTYPE,
   OBJECTTYPE,
+  ARRAYTYPE,
   ELE,
   BOP,
   UOP,
@@ -24,6 +25,7 @@ export enum AST {
   PROP,
   FALSE,
   TRUE,
+  UNDEFINED,
   NUM,
   THIS,
   NEW,
@@ -49,6 +51,7 @@ export type TExpr =
   | TProp
   | TFalse
   | TTrue
+  | TUndefined
   | TThis
   | TNew
   | TID
@@ -62,10 +65,9 @@ export type TExpr =
 export type TPrim =
   | "string"
   | "number"
-  | "undefined"
   | "boolean"
-  | "object"
-  | "function"
+  | "undefined"
+  // | "object"
   | "any"
   | "void";
 
@@ -132,7 +134,13 @@ export type TReturn = Location & { kind: AST.RETURN; value: TExpr };
 
 export type TType = Location & { kind: AST.TYPE; id: TID; type: TTypeExpr };
 
-export type TTypeExpr = TFuncType | TUnionType | TObjectType | TID | TPrim;
+export type TTypeExpr =
+  | TFuncType
+  | TUnionType
+  | TObjectType
+  | TID
+  | TPrim
+  | TArrayType;
 export type TFuncType = {
   kind: AST.FUNCTYPE;
   args: TVar[] | TTypeExpr[];
@@ -142,7 +150,8 @@ export type TUnionType = {
   kind: AST.UNIONTYPE;
   union: TTypeExpr[];
 };
-export type TObjectType = { kind: AST.OBJECTTYPE; props: TVar[] | TTypeExpr[] };
+export type TObjectType = { kind: AST.OBJECTTYPE; props: TVar[] };
+export type TArrayType = { kind: AST.ARRAYTYPE; type: TTypeExpr };
 
 export type TEle = Location & { kind: AST.ELE; obj: TExpr; index: TExpr };
 export type TProp = Location & { kind: AST.PROP; prop: TID; obj: TExpr };
@@ -178,6 +187,7 @@ export type TCall = Location & { kind: AST.CALL; funcid: TExpr; args: TExpr[] };
 export type TThis = Location & { kind: AST.THIS };
 export type TTrue = Location & { kind: AST.TRUE };
 export type TFalse = Location & { kind: AST.FALSE };
+export type TUndefined = Location & { kind: AST.UNDEFINED };
 export type TNumber = Location & { kind: AST.NUM; value: number };
 export type TID = Location & { kind: AST.ID; id: string };
 export type TNew = Location & { kind: AST.NEW; funcid: TExpr; args: TExpr[] };
@@ -201,9 +211,8 @@ export interface Location {
 }
 
 export type Symbol = {
-  value: TVar | TLet | TConst | TFunction | undefined;
-  type: TType | undefined;
-  decls: TDecl[];
+  value?: TTypeExpr;
+  type?: TTypeExpr;
 };
 
 export type Table = Map<string, Symbol>;

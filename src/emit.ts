@@ -1,17 +1,9 @@
-import {
-  AST,
-  TExpr,
-  TFuncExp,
-  TFunction,
-  TObj,
-  TStatement,
-  TVar,
-} from "./ast";
+import { AST, TExpr, TFuncExp, TFunction, TObj, TStatement, TVar } from "./ast";
 import printf from "printf";
 
 export const emit = (statements: TStatement[]) => {
-  return emitStatements(statements)
-}
+  return emitStatements(statements);
+};
 
 let level: number;
 
@@ -122,6 +114,8 @@ const emitExpr = (expr: TExpr): string => {
       return printf("false");
     case AST.TRUE:
       return printf("true");
+    case AST.UNDEFINED:
+      return printf("undefined");
     case AST.THIS:
       return printf("this");
     case AST.NEW:
@@ -173,7 +167,6 @@ const emitObj = (obj: TObj) => {
   let p1 = say("{\n");
   level++;
   let p2 = obj.props.map(emitProp).join(",\n") + "\n";
-  level--
-  return p1 + p2 + say("}")
+  level--;
+  return p1 + p2 + say("}");
 };
-
