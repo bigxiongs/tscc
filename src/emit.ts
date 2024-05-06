@@ -63,7 +63,7 @@ const emitStatement = (stmt: TStatement): string => {
       return "";
     // case AST.EXPR:
     default:
-      return emitExpr(stmt);
+      return emitExpr(stmt) + ";";
   }
 };
 

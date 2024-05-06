@@ -87,32 +87,32 @@ export function checkExpr(
     typ2: TTypeExpr = "any";
   switch (expr.kind) {
     case AST.ELE:
-      typ1 = checkExpr(expr.obj) as TArrayType;
-      typ2 = checkExpr(expr.index);
+      typ1 = checkExpr(expr.obj, ...locals) as TArrayType;
+      typ2 = checkExpr(expr.index, ...locals);
       expectArray(typ1, expr.pos);
       expect(typ2, "number", expr.pos, ...locals);
       return resolveType(typ1.type, ...locals);
     case AST.BOP:
-      typ1 = checkExpr(expr.left);
-      typ2 = checkExpr(expr.right);
+      typ1 = checkExpr(expr.left, ...locals);
+      typ2 = checkExpr(expr.right, ...locals);
       if (["+", "-", "*", "/", "&", "|"].includes(expr.op)) return "number";
       return "boolean";
     case AST.UOP:
-      typ1 = checkExpr(expr.exp);
+      typ1 = checkExpr(expr.exp, ...locals);
       if (["-"].includes(expr.op)) return "number";
       return "boolean";
     case AST.CALL:
-      typ1 = checkExpr(expr.funcid) as TFuncType;
+      typ1 = checkExpr(expr.funcid, ...locals) as TFuncType;
       expectFunction(typ1, expr.pos);
       for (let i = 0; i < expr.args.length; i++) {
         expect(
-          checkExpr(expr.args[i]),
-          checkArg(typ1.args[i]),
+          checkExpr(expr.args[i], ...locals),
+          checkArg(typ1.args[i], ...locals),
           expr.pos,
           ...locals
         );
       }
-      return resolveType(typ1.return);
+      return resolveType(typ1.return, ...locals);
     case AST.PROP:
       return checkProp(expr, ...locals);
     case AST.FALSE:
@@ -128,10 +128,9 @@ export function checkExpr(
     case AST.ID:
       let symbol = undefined;
       for (let i = 0; i < locals.length; i++) {
-        if (locals[i].has(expr.id) && locals[i].get(expr.id)?.value) {
-          symbol = locals[i].get(expr.id)?.value as TTypeExpr;
-          break;
-        }
+        if (!locals[i].get(expr.id)?.value) continue
+        symbol = (locals[i].get(expr.id) as Symbol).value as TTypeExpr;
+        break;
       }
       if (!symbol) {
         error(expr.pos, `unknown identifier ${expr.id}`);
@@ -141,7 +140,7 @@ export function checkExpr(
     case AST.NUM:
       return "number";
     case AST.ASSIGN:
-      typ1 = resolveType(expr.id, ...locals);
+      typ1 = checkExpr(expr.id, ...locals);
       typ2 = checkExpr(expr.value, ...locals);
       expect(typ1, typ2, expr.pos, ...locals);
       return typ2;
@@ -156,11 +155,11 @@ export function checkExpr(
       expect(typ1, typ2, expr.pos, ...locals);
       return typ2;
     case AST.LIST:
-      for (let i = 0; i < expr.list.length; i++) typ1 = checkExpr(expr.list[i]);
+      for (let i = 0; i < expr.list.length; i++) typ1 = checkExpr(expr.list[i], ...locals);
       if (typ1) return typ1;
       return "any";
     case AST.FUNCEXP:
-      checkFunc(expr);
+      checkFunc(expr, ...locals);
       return {
         kind: AST.FUNCTYPE,
         args: expr.args,

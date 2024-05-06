@@ -2,11 +2,11 @@
   "name": "mini-tsc",
   "version": "1.0.0",
   "description": "a compiler that compiles a mini-typescript to javascript",
-  "main": "src/index.ts",
+
   "type": "commonjs",
   "scripts": {
     "build": "tsc",
-    "test": "./bin/tscc -p sample.ts"
+    "test": "./bin/tscc sample.ts"
   },
   "keywords": [
     "typescript",
